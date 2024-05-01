@@ -1,8 +1,42 @@
 import socket
-import ipaddress
 import threading
 import time
 import sys
+
+control_chars = {
+    "^@": "\0",  # Null character
+    "^A": "\1",  # Start of heading
+    "^B": "\2",  # Start of text
+    "^C": "\3",  # End of text
+    "^D": "\4",  # End of transmission
+    "^E": "\5",  # Enquiry
+    "^F": "\6",  # Acknowledge
+    "^G": "\a",  # Audible bell
+    "^H": "\b",  # Backspace
+    "^I": "\t",  # Horizontal tab
+    "^J": "\n",  # Line feed
+    "^K": "\v",  # Vertical tab
+    "^L": "\f",  # Form feed
+    "^M": "\r",  # Carriage return
+    "^N": "\x0e",  # Shift out
+    "^O": "\x0f",  # Shift in
+    "^P": "\x10",  # Data link escape
+    "^Q": "\x11",  # Device control 1
+    "^R": "\x12",  # Device control 2
+    "^S": "\x13",  # Device control 3
+    "^T": "\x14",  # Device control 4
+    "^U": "\x15",  # Negative Acknowledge
+    "^V": "\x16",  # Synchronous idle
+    "^W": "\x17",  # End of transmission block
+    "^X": "\x18",  # Cancel
+    "^Y": "\x19",  # End of medium
+    "^Z": "\x1a",  # Substitute
+    "^[": "\x1b",  # Escape
+    "^\\": "\x1c",  # File separator
+    "^]": "\x1d",  # Group separator
+    "^^": "\x1e",  # Record separator
+    "^-": "\x1f",  # Unit separator
+}
 
 class TelnetClient:
     def __init__(self):
@@ -12,6 +46,13 @@ class TelnetClient:
         self.sock = None
         self.receive_thread = None
         self.send_thread = None
+        self.escape_character = '\x1d'
+
+    def get_key(self, val):
+        for key, value in control_chars.items():
+            if val == value:
+                return key
+        return val
 
     def active_interface(self):
         if self.connection_active and not self.paused_transmission:
@@ -34,7 +75,7 @@ class TelnetClient:
             except OSError:
                 self.connection_active = False
                 break
-
+    
     def send(self):
         while True:
             if self.paused_transmission:
@@ -42,7 +83,7 @@ class TelnetClient:
                 continue
 
             message = input()
-            if message == '\x1d':
+            if message == self.escape_character:
                 self.paused_transmission = True
             else:
                 try:
@@ -52,7 +93,14 @@ class TelnetClient:
                     break
 
     def connect(self, host, port):
+        global control_chars
         try:
+            host = socket.gethostbyname(host)
+        except Exception:
+            pass
+
+        try:
+            print(f'Trying {host}...')
             addrinfo = socket.getaddrinfo(host, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
             for res in addrinfo:
                 af, socktype, proto, canonname, sa = res
@@ -62,7 +110,10 @@ class TelnetClient:
                     self.sock.connect(sa)
                     self.sock.setblocking(False)
                     print(f'Connected to {sa[0]}.')
-                    print('Escape character is \'^]\'.')
+                    if self.get_key(self.escape_character) in control_chars:
+                        print(f'Escape character is \'{self.get_key(self.escape_character)}\'.')
+                    else:
+                        print(f'Escape character is \'{self.escape_character}\'.')
                     self.current_host = sa[0]
                     self.connection_active = True
                     self.receive_thread = threading.Thread(target=self.receive, daemon=True)
@@ -100,7 +151,7 @@ class TelnetClient:
     def end(self):
         if self.connection_active:
             self.sock.close()
-            print('Conenction closed.')
+            print('Connection closed.')
         sys.exit()
 
 class TelnetTerminal:
@@ -109,39 +160,49 @@ class TelnetTerminal:
 
     def show_commands(self):
         print("close           close current connection")
-        #print("logout          forcibly logout remote user and close the connection")
-        #print("display         display operating parameters")
-        #print("mode            try to enter line or character mode ('mode ?' for more)")
+        print("display         display operating parameters")
         print("open            connect to a site")
         print("quit            exit telnet")
-        #print("send            transmit special characters ('send ?' for more)")
-        #print("set             set operating parameters ('set ?' for more)")
-        #print("unset           unset operating parameters ('unset ?' for more)")
         print("status          print status information")
-        #print("toggle          toggle operating parameters ('toggle ?' for more)")
-        #print("slc             set treatment of special characters")
-        #print()
-        #print("z               suspend telnet")
-        #print("environ         change environment variables ('environ ?' for more)")
 
-    # def com_mode(self, command):
-    #     args = command.split(' ')
-    #     if len(args) == 1:
-    #         print("Wrong number of arguments for command.")
-    #     elif len(args) == 2:
-    #         if not self.client.connection_active:
-    #             print("?Need to be connected first.")
-    #         else:
+    def com_display(self):
+        if self.client.get_key(self.client.escape_character) in control_chars:
+            escape = self.client.get_key(self.client.escape_character)
+        else:
+            escape = self.client.escape_character
+            
+        print(f"escape          [{escape}]")
+
+    def com_set(self, command):
+        args = command.split(' ')
+        if len(args) == 1:
+            print("Format is \'set Name Value\'")
+            print("\'set ?\' for help.")
+        elif args[1] == '?':
+            print("escape          character to escape back to telnet command mode")
+        elif len(args) == 3 and args[1] == 'escape':
+            if args[2] in control_chars:
+                self.client.escape_character = control_chars[f"{args[2]}"]
+            else:
+                self.client.escape_character = args[2]
+            if self.client.get_key(self.client.escape_character) in control_chars:
+                print(f'Escape character is \'{self.client.get_key(self.client.escape_character)}\'.')
+            else:
+                print(f'Escape character is \'{self.client.escape_character}\'.')
+        else:
+            print("Format is \'set Name Value\'")
+            print("\'set ?\' for help.")
 
     def com_status(self):
         if not self.client.connection_active:
             print("No connection.")
-            print("Escape character is \'^]\'.")
         else:
             print(f"Connected to {self.client.current_host}.")
             print("Operating in obsolete linemode")
-            #print("Local character echo")
-            print("Escape character is \'^]\'.")
+        if self.client.get_key(self.client.escape_character) in control_chars:
+            print(f'Escape character is \'{self.client.get_key(self.client.escape_character)}\'.')
+        else:
+            print(f'Escape character is \'{self.client.escape_character}\'.')
 
     def com_open(self, command):
         if self.client.paused_transmission:
@@ -150,9 +211,9 @@ class TelnetTerminal:
 
         args = command.split(' ')
         if len(args) < 2:
-            print("usage: open [-l user] [-a] host-name [port]")
+            print("usage: open host-name [port]")
         elif args[1] == '?':
-            print('usage: open [-l user] [-a] host-name [port]')
+            print('usage: open host-name [port]')
         elif len(args) == 2:
             self.client.connect(args[1], 'telnet')
         else:
@@ -171,7 +232,6 @@ class TelnetTerminal:
         while True:
             if self.client.active_interface():
                 command = input('telnet> ')
-                #args = command.split(' ')
                 if command == '' and self.client.paused_transmission:
                     self.client.paused_transmission = False
                 elif command == '' and not self.client.connection_active:
@@ -187,6 +247,10 @@ class TelnetTerminal:
                     self.show_commands()
                 elif command == 'status':
                     self.com_status()
+                elif command == 'display':
+                    self.com_display()
+                elif command.startswith('set'):
+                    self.com_set(command)
                 else:
                     print('?Invalid command')
 

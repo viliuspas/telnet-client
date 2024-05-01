@@ -53,30 +53,32 @@ class TelnetClient:
 
     def connect(self, host, port):
         try:
-            host = socket.gethostbyname(host)
-        except Exception:
-            pass
-
-        try:
-            ipaddress.ip_address(host)
-            print(f'Trying {host}...')
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                self.sock.settimeout(3)
-                self.sock.connect((host, int(port)))
-                self.sock.setblocking(False)
-                print(f'Connected to {host}.')
-                print('Escape character is \'^]\'.')
-                self.current_host = host
-                self.connection_active = True
-                self.receive_thread = threading.Thread(target=self.receive, daemon=True)
-                self.send_thread = threading.Thread(target=self.send, daemon=True)
-                self.receive_thread.start()
-                self.send_thread.start()
-            except Exception:
+            addrinfo = socket.getaddrinfo(host, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
+            for res in addrinfo:
+                af, socktype, proto, canonname, sa = res
+                try:
+                    self.sock = socket.socket(af, socktype, proto)
+                    self.sock.settimeout(3)
+                    self.sock.connect(sa)
+                    self.sock.setblocking(False)
+                    print(f'Connected to {sa[0]}.')
+                    print('Escape character is \'^]\'.')
+                    self.current_host = sa[0]
+                    self.connection_active = True
+                    self.receive_thread = threading.Thread(target=self.receive, daemon=True)
+                    self.send_thread = threading.Thread(target=self.send, daemon=True)
+                    self.receive_thread.start()
+                    self.send_thread.start()
+                    break
+                except OSError:
+                    if self.sock:
+                        self.sock.close()
+                    continue
+            else:
                 print('telnet: Unable to connect to remote host: Network is unreachable')
-        except ValueError:
+        except Exception:
             print(f'telnet: could not resolve {host}/{port}: Name or service not known')
+
 
     def close(self):
         if self.connection_active:
@@ -169,7 +171,7 @@ class TelnetTerminal:
         while True:
             if self.client.active_interface():
                 command = input('telnet> ')
-                args = command.split(' ')
+                #args = command.split(' ')
                 if command == '' and self.client.paused_transmission:
                     self.client.paused_transmission = False
                 elif command == '' and not self.client.connection_active:

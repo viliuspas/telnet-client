@@ -2,6 +2,7 @@ import socket
 import threading
 import time
 import sys
+import json
 
 control_chars = {
     "^@": "\0",  # Null character
@@ -47,6 +48,21 @@ class TelnetClient:
         self.receive_thread = None
         self.send_thread = None
         self.escape_character = '\x1d'
+        self.connections_cache = {}
+        self.load_connections_cache()
+
+    def load_connections_cache(self):
+        try:
+            with open("cache.json", "r") as f:
+                self.connections_cache = json.load(f)
+        except FileNotFoundError:
+            self.connections_cache = {}
+
+    
+    def save_connections_cache(self):
+        with open("cache.json", "w") as f:
+            json.dump(self.connections_cache, f)
+
 
     def get_key(self, val):
         for key, value in control_chars.items():
@@ -120,6 +136,8 @@ class TelnetClient:
                     self.send_thread = threading.Thread(target=self.send, daemon=True)
                     self.receive_thread.start()
                     self.send_thread.start()
+                    self.connections_cache[self.current_host] = port
+                    self.save_connections_cache()
                     break
                 except OSError:
                     if self.sock:
@@ -139,6 +157,8 @@ class TelnetClient:
             print('Connection closed.')
             self.receive_thread.join()
             self.send_thread.join()
+            if self.current_host in self.connections_cache:
+                self.save_connections_cache()
         else:
             print('Need to be connected first for `bye\'.')
 
@@ -164,6 +184,8 @@ class TelnetTerminal:
         print("open            connect to a site")
         print("quit            exit telnet")
         print("status          print status information")
+        print("list            list saved connections")
+        print("s               connect to a server from the list")
 
     def com_display(self):
         if self.client.get_key(self.client.escape_character) in control_chars:
@@ -219,6 +241,39 @@ class TelnetTerminal:
         else:
             self.client.connect(args[1], args[2])
 
+    def com_s(self, command):
+        if self.client.paused_transmission:
+            print(f'?Already connected to {self.client.current_host}')
+            return
+
+        args = command.split(' ')
+        if len(args) < 2:
+            print("usage: s [connection_number]")
+        elif args[1] == '?':
+            print('usage: s [connection_number]')
+        elif len(args) == 2:
+            self.connect_to_numbered_connection(args[1])
+
+
+    def connect_to_numbered_connection(self, number):
+        try:
+            for index, (host, port) in enumerate(self.client.connections_cache.items()):
+                if index+1 == int(number):
+                    self.client.connect(host, port)
+                    return
+            print("Invalid connection number.")
+        except:
+            print("Invalid connection number.")
+
+    def list_connections(self):
+        index = 1
+        if len(self.client.connections_cache.items()) != 0:
+            for host, port in self.client.connections_cache.items():
+                print(f"{index} - {host}:{port}")
+                index += 1
+        else:
+            print("No cached connections.")
+
     def start(self):
         port = 'telnet'
         if len(sys.argv) == 3:
@@ -251,6 +306,10 @@ class TelnetTerminal:
                     self.com_display()
                 elif command.startswith('set'):
                     self.com_set(command)
+                elif command == 'list':
+                    self.list_connections()
+                elif command.startswith('s'):
+                    self.com_s(command)
                 else:
                     print('?Invalid command')
 

@@ -207,8 +207,8 @@ class TelnetTerminal:
         print("open            connect to a site")
         print("quit            exit telnet")
         print("status          print status information")
-        print("list            list saved connections")
-        print("s               connect to a server from the list")
+        print("L1              connection cache")
+        print("L2              connection message cache")
 
     def com_display(self):
         if self.client.get_key(self.client.escape_character) in control_chars:
@@ -309,9 +309,9 @@ class TelnetTerminal:
     def com_l1(self, command):
         args = command.split(' ')
         if len(args) < 2:
-            print("usage: L1 [%list] [%<index>]")
+            print("usage: L1 [%list | %<index>]")
         elif args[1] == '?':
-            print("usage: L1 [%list] [%<index>]")
+            print("usage: L1 [%list | %<index>]")
         elif len(args) == 2 and args[1] == '%list':
             self.display_con_cache()
         elif len(args) == 2 and args[1].startswith('%'):
@@ -322,22 +322,22 @@ class TelnetTerminal:
             args[1] = args[1].replace('%', '')
             self.connect_to_numbered_connection(args[1])
         else:
-            print("usage: L1 [%list] [%<index>]")
+            print("usage: L1 [%list | %<index>]")
 
     def com_l2(self, command):
         if self.client.connection_active:
             args = command.split(' ')
             if len(args) < 2:
-                print("usage: L2 [%list] [%<index>]")
+                print("usage: L2 [%list | %<index>]")
             elif args[1] == '?':
-                print("usage: L2 [%list] [%<index>]")
+                print("usage: L2 [%list | %<index>]")
             elif len(args) == 2 and args[1] == '%list':
                 self.display_msg_cache()
             elif len(args) == 2 and args[1].startswith('%'):
                 args[1] = args[1].replace('%', '')
                 self.send_numbered_message(args[1])
             else:
-                print("usage: L2 [%list] [%<index>]")
+                print("usage: L2 [%list | %<index>]")
         else:
             print("No active connection.")
 

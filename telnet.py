@@ -3,6 +3,7 @@ import threading
 import time
 import sys
 import json
+import string
 
 control_chars = {
     "^@": "\0",  # Null character
@@ -43,25 +44,30 @@ class TelnetClient:
     def __init__(self):
         self.connection_active = False
         self.paused_transmission = False
+        self.cached_message = ''
         self.current_host = ''
         self.sock = None
         self.receive_thread = None
         self.send_thread = None
         self.escape_character = '\x1d'
         self.connections_cache = {}
+        self.message_cache = {}
         self.load_connections_cache()
 
     def load_connections_cache(self):
         try:
             with open("cache.json", "r") as f:
-                self.connections_cache = json.load(f)
+                data = json.load(f)
+                self.connections_cache = data.get("connections_cache", {})
+                self.message_cache = data.get("message_cache", {})
         except FileNotFoundError:
             self.connections_cache = {}
+            self.message_cache = {}
 
-    
     def save_connections_cache(self):
+        data = {"connections_cache": self.connections_cache, "message_cache": self.message_cache}
         with open("cache.json", "w") as f:
-            json.dump(self.connections_cache, f)
+            json.dump(data, f)
 
 
     def get_key(self, val):
@@ -94,15 +100,30 @@ class TelnetClient:
     
     def send(self):
         while True:
+            if self.cached_message != '':
+                self.paused_transmission = False
+
             if self.paused_transmission:
                 time.sleep(1)
                 continue
-
-            message = input()
+            
+            if self.cached_message == '':
+                message = input()
+            else:
+                message = self.cached_message
+                self.cached_message = ''
+                
             if message == self.escape_character:
                 self.paused_transmission = True
             else:
                 try:
+                    if message != '':
+                        if self.current_host in self.message_cache:
+                            if message not in self.message_cache[self.current_host]:
+                                self.message_cache[self.current_host].append(message)
+                        else:
+                            self.message_cache[self.current_host] = [message]
+
                     self.sock.sendall((message + '\r\n').encode('utf-8'))
                 except OSError:
                     self.connection_active = False
@@ -170,6 +191,8 @@ class TelnetClient:
 
     def end(self):
         if self.connection_active:
+            if self.connection_active:
+                self.save_connections_cache()
             self.sock.close()
             print('Connection closed.')
         sys.exit()
@@ -241,31 +264,40 @@ class TelnetTerminal:
         else:
             self.client.connect(args[1], args[2])
 
-    def com_s(self, command):
-        if self.client.paused_transmission:
-            print(f'?Already connected to {self.client.current_host}')
-            return
-
-        args = command.split(' ')
-        if len(args) < 2:
-            print("usage: s [connection_number]")
-        elif args[1] == '?':
-            print('usage: s [connection_number]')
-        elif len(args) == 2:
-            self.connect_to_numbered_connection(args[1])
-
-
     def connect_to_numbered_connection(self, number):
         try:
             for index, (host, port) in enumerate(self.client.connections_cache.items()):
                 if index+1 == int(number):
                     self.client.connect(host, port)
                     return
-            print("Invalid connection number.")
+            print("Invalid index.")
         except:
-            print("Invalid connection number.")
+            print("Invalid index.")
 
-    def list_connections(self):
+    def send_numbered_message(self, number):
+        try:
+            index = int(number) - 1
+            if self.client.current_host in self.client.message_cache:
+                if index < len(self.client.message_cache[self.client.current_host]):
+                    message = self.client.message_cache[self.client.current_host][index]
+                    self.client.cached_message = message
+                    print(message)
+                else:
+                    print("Invalid index.")
+            else:
+                print("No messages cached for the current connection.")
+        except ValueError:
+            print("Invalid index.")
+
+    def display_msg_cache(self):
+        if self.client.current_host in self.client.message_cache:
+            print(f"Messages sent to {self.client.current_host}:")
+            for index, message in enumerate(self.client.message_cache[self.client.current_host], start=1):
+                print(f"{index} - {message}")
+        else:
+            print("No messages cached for the current connection.")
+
+    def display_con_cache(self):
         index = 1
         if len(self.client.connections_cache.items()) != 0:
             for host, port in self.client.connections_cache.items():
@@ -273,6 +305,41 @@ class TelnetTerminal:
                 index += 1
         else:
             print("No cached connections.")
+
+    def com_l1(self, command):
+        args = command.split(' ')
+        if len(args) < 2:
+            print("usage: L1 [%list] [%<index>]")
+        elif args[1] == '?':
+            print("usage: L1 [%list] [%<index>]")
+        elif len(args) == 2 and args[1] == '%list':
+            self.display_con_cache()
+        elif len(args) == 2 and args[1].startswith('%'):
+            if self.client.paused_transmission:
+                print(f'?Already connected to {self.client.current_host}')
+                return
+            
+            args[1] = args[1].replace('%', '')
+            self.connect_to_numbered_connection(args[1])
+        else:
+            print("usage: L1 [%list] [%<index>]")
+
+    def com_l2(self, command):
+        if self.client.connection_active:
+            args = command.split(' ')
+            if len(args) < 2:
+                print("usage: L2 [%list] [%<index>]")
+            elif args[1] == '?':
+                print("usage: L2 [%list] [%<index>]")
+            elif len(args) == 2 and args[1] == '%list':
+                self.display_msg_cache()
+            elif len(args) == 2 and args[1].startswith('%'):
+                args[1] = args[1].replace('%', '')
+                self.send_numbered_message(args[1])
+            else:
+                print("usage: L2 [%list] [%<index>]")
+        else:
+            print("No active connection.")
 
     def start(self):
         port = 'telnet'
@@ -286,30 +353,34 @@ class TelnetTerminal:
 
         while True:
             if self.client.active_interface():
-                command = input('telnet> ')
+                if self.client.cached_message != '':
+                    command = ''
+                else:
+                    command = input('telnet> ')
+
                 if command == '' and self.client.paused_transmission:
                     self.client.paused_transmission = False
                 elif command == '' and not self.client.connection_active:
                     continue
-                elif command.startswith('open'):
+                elif command.lower().startswith('open'):
                     self.com_open(command)
-                elif command == 'quit':
+                elif command.lower() == 'quit':
                     self.client.end()
                     sys.exit()
                 elif command == 'close':
                     self.client.close()
                 elif command == '?':
                     self.show_commands()
-                elif command == 'status':
+                elif command.lower() == 'status':
                     self.com_status()
-                elif command == 'display':
+                elif command.lower() == 'display':
                     self.com_display()
-                elif command.startswith('set'):
+                elif command.lower().startswith('set'):
                     self.com_set(command)
-                elif command == 'list':
-                    self.list_connections()
-                elif command.startswith('s'):
-                    self.com_s(command)
+                elif command.lower().startswith('l1'):
+                    self.com_l1(command)
+                elif command.lower().startswith('l2'):
+                    self.com_l2(command)
                 else:
                     print('?Invalid command')
 

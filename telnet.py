@@ -109,6 +109,14 @@ class TelnetClient:
             
             if self.cached_message == '':
                 message = input()
+                if message == '%list':
+                    self.display_msg_cache()
+                    continue
+                elif message.startswith('%'):
+                    message = message.replace('%', '')
+                    self.send_numbered_message(message)
+                    continue
+
             else:
                 message = self.cached_message
                 self.cached_message = ''
@@ -197,6 +205,29 @@ class TelnetClient:
             print('Connection closed.')
         sys.exit()
 
+    def send_numbered_message(self, number):
+        try:
+            index = int(number) - 1
+            if self.current_host in self.message_cache:
+                if index < len(self.message_cache[self.current_host]):
+                    message = self.message_cache[self.current_host][index]
+                    self.cached_message = message
+                    print(message)
+                else:
+                    print("Invalid index.")
+            else:
+                print("No messages cached for the current connection.")
+        except ValueError:
+            print("Invalid index.")
+
+    def display_msg_cache(self):
+        if self.current_host in self.message_cache:
+            print(f"Messages sent to {self.current_host}:")
+            for index, message in enumerate(self.message_cache[self.current_host], start=1):
+                print(f"{index} - {message}")
+        else:
+            print("No messages cached for the current connection.")
+
 class TelnetTerminal:
     def __init__(self, client):
         self.client = client
@@ -207,8 +238,8 @@ class TelnetTerminal:
         print("open            connect to a site")
         print("quit            exit telnet")
         print("status          print status information")
-        print("L1              connection cache")
-        print("L2              connection message cache")
+        print("%list           list connection cache")
+        print("%<index>        connect to connection cache index")
 
     def com_display(self):
         if self.client.get_key(self.client.escape_character) in control_chars:
@@ -274,29 +305,6 @@ class TelnetTerminal:
         except:
             print("Invalid index.")
 
-    def send_numbered_message(self, number):
-        try:
-            index = int(number) - 1
-            if self.client.current_host in self.client.message_cache:
-                if index < len(self.client.message_cache[self.client.current_host]):
-                    message = self.client.message_cache[self.client.current_host][index]
-                    self.client.cached_message = message
-                    print(message)
-                else:
-                    print("Invalid index.")
-            else:
-                print("No messages cached for the current connection.")
-        except ValueError:
-            print("Invalid index.")
-
-    def display_msg_cache(self):
-        if self.client.current_host in self.client.message_cache:
-            print(f"Messages sent to {self.client.current_host}:")
-            for index, message in enumerate(self.client.message_cache[self.client.current_host], start=1):
-                print(f"{index} - {message}")
-        else:
-            print("No messages cached for the current connection.")
-
     def display_con_cache(self):
         index = 1
         if len(self.client.connections_cache.items()) != 0:
@@ -306,40 +314,13 @@ class TelnetTerminal:
         else:
             print("No cached connections.")
 
-    def com_l1(self, command):
-        args = command.split(' ')
-        if len(args) < 2:
-            print("usage: L1 [%list | %<index>]")
-        elif args[1] == '?':
-            print("usage: L1 [%list | %<index>]")
-        elif len(args) == 2 and args[1] == '%list':
-            self.display_con_cache()
-        elif len(args) == 2 and args[1].startswith('%'):
-            if self.client.paused_transmission:
-                print(f'?Already connected to {self.client.current_host}')
-                return
-            
-            args[1] = args[1].replace('%', '')
-            self.connect_to_numbered_connection(args[1])
-        else:
-            print("usage: L1 [%list | %<index>]")
+    def com_l1_list(self):
+        self.display_con_cache()
 
-    def com_l2(self, command):
-        if self.client.connection_active:
-            args = command.split(' ')
-            if len(args) < 2:
-                print("usage: L2 [%list | %<index>]")
-            elif args[1] == '?':
-                print("usage: L2 [%list | %<index>]")
-            elif len(args) == 2 and args[1] == '%list':
-                self.display_msg_cache()
-            elif len(args) == 2 and args[1].startswith('%'):
-                args[1] = args[1].replace('%', '')
-                self.send_numbered_message(args[1])
-            else:
-                print("usage: L2 [%list | %<index>]")
-        else:
-            print("No active connection.")
+
+    def com_l1_connect(self, command):
+        command = command.replace('%', '')
+        self.connect_to_numbered_connection(command)
 
     def start(self):
         port = 'telnet'
@@ -377,10 +358,10 @@ class TelnetTerminal:
                     self.com_display()
                 elif command.lower().startswith('set'):
                     self.com_set(command)
-                elif command.lower().startswith('l1'):
-                    self.com_l1(command)
-                elif command.lower().startswith('l2'):
-                    self.com_l2(command)
+                elif command.lower() == '%list':
+                    self.com_l1_list()
+                elif command.lower().startswith('%'):
+                    self.com_l1_connect(command)
                 else:
                     print('?Invalid command')
 
